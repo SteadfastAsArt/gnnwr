@@ -119,7 +119,8 @@ class GNNWR:
             log_path="gnnwr_logs",
             log_file_name="gnnwr" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".log",
             log_level=logging.INFO,
-            optimizer_params=None
+            optimizer_params=None,
+            embed_dim=None
     ):
         warnings.warn("This version of GNNWR (0.1.17) will be deprecated in the forthcoming new version (1.x.x).")
         self._train_dataset = train_dataset  # train dataset
@@ -137,8 +138,10 @@ class GNNWR:
         self._drop_out = drop_out  # drop_out ratio
         self._batch_norm = batch_norm  # batch normalization
         self._activate_func = activate_func  # activate function , default: PRelu(0.4)
+        self._embed_dim = embed_dim
         self._model = SWNN(self._dense_layers, self._insize, self._outsize,
-                           self._drop_out, self._activate_func, self._batch_norm)  # model
+                           self._drop_out, self._activate_func, self._batch_norm,
+                           embed_dim=self._embed_dim)  # model
         self._log_path = log_path  # log path
         self._log_file_name = log_file_name  # log file
         self._log_level = log_level  # log level
@@ -990,13 +993,15 @@ class GTNNWR(GNNWR):
                  optimizer_params=None,
                  STPNN_outsize=1,
                  STNN_SPNN_params=None,
+                 embed_dim=None,
                  ):
 
         if dense_layers is None:
             dense_layers = [[], []]
         super(GTNNWR, self).__init__(train_dataset, valid_dataset, test_dataset, dense_layers[1], start_lr, optimizer,
                                      drop_out, batch_norm, activate_func, model_name, model_save_path, write_path,
-                                     use_gpu, use_ols, log_path, log_file_name, log_level, optimizer_params)
+                                     use_gpu, use_ols, log_path, log_file_name, log_level, optimizer_params,
+                                     embed_dim=embed_dim)
         self._STPNN_out = STPNN_outsize
         self._modelName = model_name  # model name
         if train_dataset.simple_distance:
@@ -1014,12 +1019,12 @@ class GTNNWR(GNNWR):
                                         STPNN(dense_layers[0], self.STNN_outsize + self.SPNN_outsize,
                                               self._STPNN_out, drop_out, batch_norm=self.STPNN_batch_norm),
                                         SWNN(dense_layers[1], self._STPNN_out * self._insize, self._outsize, drop_out,
-                                             activate_func, batch_norm))
+                                             activate_func, batch_norm, embed_dim=self._embed_dim))
         else:
             self._model = nn.Sequential(STPNN(dense_layers[0], insize, self._STPNN_out, drop_out,
                                               batch_norm=self.STPNN_batch_norm),
                                         SWNN(dense_layers[1], self._STPNN_out * self._insize, self._outsize, drop_out,
-                                             activate_func, batch_norm))
+                                             activate_func, batch_norm, embed_dim=self._embed_dim))
         self.init_optimizer(optimizer, optimizer_params)
         # If the data directory not exists, create it
         if not os.path.exists(self._log_path):

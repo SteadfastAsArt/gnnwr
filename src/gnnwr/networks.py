@@ -89,6 +89,45 @@ class LinearNetwork(nn.Module):
     def __repr__(self) -> str:
         return self.__str__()
 
+class DistanceProjection(nn.Module):
+    """
+    DistanceProjection projects a high-dimensional distance vector to a fixed
+    embedding dimension, decoupling knn_k from SWNN hidden layer structure.
+
+    Parameters
+    ----------
+    insize: int
+        input size (distance vector dimension, e.g. knn_k)
+    embed_dim: int
+        output embedding dimension (default: ``128``)
+    drop_out: float
+        drop out rate (default: ``0.1``)
+    """
+    def __init__(self, insize, embed_dim=128, drop_out=0.1):
+        super(DistanceProjection, self).__init__()
+        self.linear = nn.Linear(insize, embed_dim)
+        self.bn = nn.BatchNorm1d(embed_dim)
+        self.activate = nn.PReLU(init=0.1)
+        if drop_out > 0:
+            self.dropout = nn.Dropout(drop_out)
+        else:
+            self.dropout = nn.Identity()
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.kaiming_uniform_(self.linear.weight, a=0, mode='fan_in')
+        if self.linear.bias is not None:
+            self.linear.bias.data.fill_(0)
+
+    def forward(self, x):
+        x = x.to(torch.float32)
+        x = self.linear(x)
+        x = self.bn(x)
+        x = self.activate(x)
+        x = self.dropout(x)
+        return x
+
+
 class SWNN(nn.Module):
     """
     SWNN is a neural network with dense layers, which is used to calculate the spatial and temporal weight of features.
@@ -111,22 +150,33 @@ class SWNN(nn.Module):
         whether use batch normalization(default: ``True``)
     """
     def __init__(self, dense_layer=None, insize=-1, outsize=-1, drop_out=0.2, activate_func=nn.PReLU(init=0.1),
-                 batch_norm=True):
+                 batch_norm=True, embed_dim=None):
 
         super(SWNN, self).__init__()
-        if dense_layer is None or len(dense_layer) == 0:
-            self.dense_layer = default_dense_layer(insize, outsize)
-        else:
-            self.dense_layer = dense_layer
         if insize < 0 or outsize < 0:
             raise ValueError("insize and outsize must be positive")
+
+        self.insize = insize
+        self.outsize = outsize
         self.drop_out = drop_out
         self.batch_norm = batch_norm
         self.activate_func = activate_func
-        self.insize = insize
-        self.outsize = outsize
+
+        # Distance projection: project high-dim distance vectors to fixed embed_dim
+        if embed_dim is not None and insize > embed_dim:
+            self.projection = DistanceProjection(insize, embed_dim)
+            effective_insize = embed_dim
+        else:
+            self.projection = None
+            effective_insize = insize
+
+        if dense_layer is None or len(dense_layer) == 0:
+            self.dense_layer = default_dense_layer(effective_insize, outsize)
+        else:
+            self.dense_layer = dense_layer
+
         count = 0  # used to name layers
-        lastsize = self.insize  # used to record the size of last layer
+        lastsize = effective_insize  # used to record the size of last layer
         self.fc = nn.Sequential()
 
         for size in self.dense_layer:
@@ -137,8 +187,11 @@ class SWNN(nn.Module):
             count += 1
         self.fc.add_module("full" + str(count),
                             LinearNetwork(lastsize, self.outsize))
+
     def forward(self, x):
         x = x.to(torch.float32)
+        if self.projection is not None:
+            x = self.projection(x)
         x = self.fc(x)
         return x
 
